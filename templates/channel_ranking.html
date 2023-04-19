@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <title>Channel Statistic</title>
+</head>
+<body>
+    <img src="{{ url_for('static', filename='Youtube-logo.png') }}" alt="Youtube Logo" id="top-left-image">
+    <h1>Channel Statistic</h1>
+    <form action="/channels" method="GET">
+        <label for="sort_by">Sort By:</label>
+        <select name="sort_by" id="sort_by">
+            {% for header in headings %}
+            <option value="{{ header }}" {% if header == sort_by %}selected{% endif %}>{{ header }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Sort</button>
+    </form>
+    <table>
+        <tr>
+            {% for header in headings %}
+            <th>{{ header }}</th>
+            {% endfor %}
+        </tr>
+        {% for row in data %}
+        <tr>
+            {% for cell in row %}
+            <th>{{ cell }}</th>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+    <div class="button-container">
+        <a href="/channels"><button>Refresh</button></a>
+        <a href={{url_for('home_page')}}><button>Main Page</button></a>
+        <a href={{url_for('videos_page')}}><button>Video Statistic</button></a>
+        <a href="{{ url_for('channels_page', download='1') }}" class="download-csv"><button>Download CSV</button></a>
+    </div>
+</body>
+</html>

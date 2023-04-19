@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <title>Main Page</title>
+</head>
+<body>
+    <img src="{{ url_for('static', filename='Youtube-logo.png') }}" alt="Youtube Logo" id="top-left-image">
+    <h1>Youtube Channels Tracker</h1>
+    <form action="/" method="POST">
+        <input type="text" name="input_string" placeholder="Enter a Youtube Channel ID">
+        <button type="submit">Add</button>
+        <button type="submit" formaction="/clear">Clear</button>
+    </form>
+    <table id="strings-table">
+        {% for string in strings %}
+            <tr><td>{{ string }}</td></tr>
+        {% endfor %}
+    </table>
+    <div class="button-container">
+        <a href="/insert_data"><button>Insert Data</button></a>
+        <a href={{url_for('channels_page')}}><button>Channel Ranking</button></a>
+        <a href={{url_for('videos_page')}}><button>Video Statistic</button></a>
+        <form action="/clear_database" method="POST">
+            <button type="submit">Reset Tracker</button>
+        </form>
+    </div>
+    <form action="/channel_id_lookup" method="POST">
+        <input type="text" name="channel_name" placeholder="Enter a Youtube Channel Name">
+        <button type="submit">Get Channel ID</button>
+    </form>
+    {% if channel_name and channel_id %}
+        <div class="channel-info">
+            <img src="{{ url_for('static', filename='channel_thumbnail.png') }}" alt="Channel Icon" class="channel-icon">
+            <p>Channel ID for "{{ channel_name }}" is: {{ channel_id }}</p>
+        </div>
+    {% elif channel_name and channel_id == None %}
+        <div class="message" style="color: red;">
+            <p>Channel not exist</p>
+        </div>
+    {% endif %}
+</body>
+</html>
