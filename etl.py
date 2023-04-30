@@ -9,8 +9,79 @@ from langdetect import detect
 from langdetect.lang_detect_exception import LangDetectException
 from IPython.display import Image
 from PIL import Image
-import requests
+import requests, time
 from io import BytesIO
+from apscheduler.schedulers.background import BackgroundScheduler
+
+
+#________________________________________________________________________________________________
+# API Call Query logic:
+# Our primary query logic on the web takes the channel id as the sole input, because we want to be user friendly
+# But we also support other inputs, such as video id and category id, to achieve more customized query.
+
+#  (1) For channels:
+
+# By specifying video ids, we get the corresponding channel ids
+# By specifying channel ids, we get the following information about these channels:
+
+        # Channel_id (VARCHAR(255), PRIMARY KEY): Unique identifier for a YouTube channel.
+        # Channel_name (VARCHAR(255)): Name of the YouTube channel.
+        # Subscribers (INT): Number of subscribers for the channel.
+        # Views (BIGINT): Total number of views for all videos on the channel.
+        # Total_videos (INT): Total number of videos uploaded to the channel.
+        # playlist_id (VARCHAR(255)): Unique identifier for a playlist associated with the channel.
+        # creation_date (TIMESTAMPTZ): Date and time when the channel was created.
+        # age_days (INT): Age of the channel in days.
+        # age_years (INT): Age of the channel in years.
+
+
+# (2) For videos:
+
+# If we don't have target video ids in mind, we can specify certain conditions to get a list of video ids:
+
+        # order of the list (date/rating/relevance/title/viewCount),
+        # length of the list, (how many videos do we want to fetch)
+        # category (43 categories in total, assigned by Youtube) ,
+        ## region (e.g. US),
+        # language (e.g. English),
+        # videoDuration (long/medium/short, long for >20 min, short for <4min),
+        # publishedBefore/publishedAfter (a time filter)
+
+# For example, we can get a list of 50 videos in the Sports category that are published today, order by viewCount (this means we are getting the most popular videos)
+
+# If we have target channel ids in mind, by specifying a list of channel ids, we get all the video ids in these channels.
+# By specifying video ids, we get information about these videos.
+
+        # video_id (VARCHAR(255), PRIMARY KEY): Unique identifier for a video.
+        # video_title (VARCHAR(255)): Title of the video.
+        # Channel_id (VARCHAR(255)): Unique identifier for the channel that uploaded the video.
+        # Channel_name (VARCHAR(255)): Name of the YouTube channel that uploaded the video.
+        # category_id (VARCHAR(255)): Unique identifier for the video's category.
+        # category_name (VARCHAR(255)): Name of the video's category.
+        # description (TEXT): Description text for the video.
+        # tags (VARCHAR(255)): Tags associated with the video.
+        # view_count (INT): Number of views for the video.
+        # like_count (INT): Number of likes for the video.
+        # comment_count (INT): Number of comments on the video.
+        # Published_date (TIMESTAMPTZ): Date and time when the video was published.
+        # age_days (INT): Age of the video in days.
+        # age_years (INT): Age of the video in years.
+
+
+# (3) For comments:
+
+# By specifying a list of video ids, we get information about the comments below these videos.
+
+        # comment_id (INT): Unique identifier for a comment.
+        # video_id (VARCHAR(255), FOREIGN KEY): Unique identifier for the video associated with the comment.
+        # author (VARCHAR(255)): Author of the comment.
+        # text (TEXT): Text content of the comment.
+        # likes (INT): Number of likes for the comment.
+        # PRIMARY KEY (comment_id, video_id): Combination of comment_id and video_id as the primary key.
+
+# We can also filter the top 5 upvoted comments
+#________________________________________________________________________________________________
+#Below is the packaged functions
 
 def is_english(text):
     try:
@@ -23,7 +94,8 @@ class youtubeFetcher:
         self.api_key = api_key
         self.youtube = build('youtube', 'v3', developerKey=api_key)
       
-        
+    #let's say our clients have no target videos or channels in mind. Our clients can specify the
+    #target category and see the current popular video and channel information
     def get_most_popular_videos(self, category_id, max_results):
         videos = []
         next_page_token = None
@@ -62,8 +134,8 @@ class youtubeFetcher:
         df_vedio = pd.DataFrame(video_data)
         id_list=df_vedio['video_id'].tolist()               
         return id_list
-    
-    
+
+
     
     def get_video_category_id(self, video_id):
         request = self.youtube.videos().list(
@@ -101,15 +173,11 @@ class youtubeFetcher:
             )
             response = request.execute()
             response_items = response['items']
-# return response['items']
         except HttpError as e:
             print(f"An error occurred: {e}")
-# return None
-# def get_video_stats(response):
+
         video_data = []
         for item in response_items:
-            #if item['statistics'].get('likeCount') is None:
-                #continue
             video_data.append({
                 'video_id': item['id'],
                 'video_title': item['snippet']['title'],
@@ -120,7 +188,7 @@ class youtubeFetcher:
                 'description': item['snippet']['description'],
                 'tags': item['snippet'].get('tags', 'null'),
                 'view_count': int(item['statistics']['viewCount']),
-                'like_count': int(item['statistics'].get('likeCount', 0)),
+                'like_count': int(item['statistics'].get('likeCount', 0)),  #The like property of some videos may also be hidden by youtubers.
                 'comment_count': int(item['statistics']['commentCount']),
                 'Published_date': item['snippet']['publishedAt'],
                 'age_days' : (datetime.utcnow().replace(tzinfo=pytz.utc) - parse(item['snippet']['publishedAt'])).days,
@@ -161,7 +229,7 @@ class youtubeFetcher:
             return None    
 
 
-    # main function 2
+    # main function 2, get all the video stats that belong to the target channel
     def get_channel_video_stats(self, channel_ids):    
         video_data = []        
         for channel_id in channel_ids:
@@ -190,7 +258,7 @@ class youtubeFetcher:
         return df
     
     
-    # main function 1
+    # main function 1, get stats about the target channel
     def get_channel_stats(self, channel_ids):
         all_data = []
         request = self.youtube.channels().list(
@@ -232,7 +300,7 @@ class youtubeFetcher:
             print(f"An error occurred: {e}")
             return []
 
-
+    #get video comments for the specified channel
     def get_comment_info(self, channel_ids):
         channel_video_stats = self.get_channel_video_stats(channel_ids)
         video_ids = channel_video_stats['video_id'].tolist()
@@ -249,7 +317,8 @@ class youtubeFetcher:
                  })          
         df = pd.DataFrame(video_comments)
         return df
-    
+
+    #We assume that clients may don't know the id of their target channel. We provide this search function.
     def fetch_channel_id(self, channel_name):
         url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={channel_name}&type=channel&key={self.api_key}"
         response = requests.get(url)
@@ -290,7 +359,7 @@ class youtubeFetcher:
         print(f"All rows were sucessfully inserted in the {name} table")
         
     
-    def update_data(self, conn, tb, name, conflict_column):
+    def update_data(self, conn, tb, name, conflict_column): #conflict column is the primary key of the table
         cur = conn.cursor()
         cols = [x for x in tb.columns]
 
@@ -309,3 +378,39 @@ class youtubeFetcher:
 
         conn.commit()
         print(f"All rows were successfully upserted in the {name} table")
+
+# ________________________________________________________________________________________________
+# Below we use APScheduler to automatically refresh database every 20 seconds
+# We use APScheduler becasue our data volume and processing requirements currently are not very high.
+# APScheduler is simple to set up with lower overhead and resource requirements.
+
+    def fetch_and_store_data(self, conn, channel_ids):
+        # fetching data
+        video_stats = self.get_channel_video_stats(channel_ids)
+        channel_stats = self.get_channel_stats(self.youtube, channel_ids)
+        comment = self.get_comment_info(channel_ids)
+        print("succeffully fetching data")
+
+        # storing data
+        self.upsert_data(conn, video_stats, 'video_statistics', 'video_id')
+        self.upsert_data(conn, channel_stats, 'channel_statistics', 'channel_id')
+        self.upsert_data(conn, comment, 'video_comments', 'comment_id,video_id')
+        print("succeffully storing data")
+
+    def refresh_database(self, conn, channel_ids):
+        # Create a background scheduler
+        scheduler = BackgroundScheduler()
+
+        # Add a job to the scheduler to run the fetch_and_store_data function every hour
+        scheduler.add_job(self.fetch_and_store_data(conn, channel_ids), 'interval', seconds=20)
+
+        # Start the scheduler
+        scheduler.start()
+
+        # Keep the script running indefinitely so the scheduler can execute the jobs
+        try:
+            while True:
+                time.sleep(1)
+        except (KeyboardInterrupt, SystemExit):
+            # Shut down the scheduler on exit
+            scheduler.shutdown()
